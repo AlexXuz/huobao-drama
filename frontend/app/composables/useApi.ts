@@ -14,7 +14,7 @@ async function req<T = any>(method: string, path: string, body?: any): Promise<T
 
     if (!resp.ok || (json.code && json.code >= 400)) {
       console.log(`%c[API] %c${method} ${path} %c${resp.status} %c${ms}ms`, 'color:#888', 'color:#ef5350', 'color:#ef5350;font-weight:bold', 'color:#888', json.message || '')
-      throw new Error(json.message || `${resp.status}`)
+      throw Object.assign(new Error(json.message || `${resp.status}`), { error_code: json.error_code, status: resp.status })
     }
 
     console.log(`%c[API] %c${method} ${path} %c${resp.status} %c${ms}ms`, 'color:#888', 'color:#66bb6a', 'color:#66bb6a;font-weight:bold', 'color:#888')

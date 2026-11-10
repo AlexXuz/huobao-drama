@@ -18,7 +18,8 @@ export const MODERATION_RE = /sensitive|moderation|真人|人脸|real[\s_-]?pers
 const NETWORK_RE = /failed to fetch|network ?error|load failed|network request failed|fetch failed/i
 const NONJSON_RE = /unexpected token|not valid json|failed to parse/i
 const SERVER5XX_RE = /(^|\D)5\d{2}(\D|$)|internal server error|服务器内部错误/i
-const AUTH_RE = /(^|\D)40[13](\D|$)|unauthorized|forbidden|invalid[\s_-]?api[\s_-]?key|authentication|鉴权/i
+const AUTH_RE = /(^|\D)40[13](\D|$)|unauthorized|forbidden|authentication|鉴权/i
+const INVALID_KEY_RE = /\b(?:invalid|incorrect|expired)[\s_-]+api[\s_-]+key\b|\bapi[\s_-]+key\b[^\r\n]{0,30}\b(?:not\s+valid|invalid|incorrect|expired)\b|\binvalid_api_key\b/i
 const RATELIMIT_RE = /(^|\D)429(\D|$)|rate[\s_-]?limit|too many requests|quota|额度不足|insufficient/i
 const TIMEOUT_RE = /timeout|timed out|polling exceeded|超时/i
 /** 技术特征：出现即判定不可直接透传给用户 */
@@ -39,6 +40,10 @@ function messageOf(err: unknown): string {
  */
 export function mapError(err: unknown, opts?: { fallback?: string }): string {
   const msg = messageOf(err).trim()
+  const errorCode = err && typeof err === 'object' ? (err as { error_code?: unknown }).error_code : undefined
+  if (errorCode === 'apiKeyLooksLikeUrl' || errorCode === 'apiKeyInvalid') return t(`errors.${errorCode}`)
+  if (msg === 'apiKeyLooksLikeUrl' || msg === 'apiKeyInvalid') return t(`errors.${msg}`)
+  if (INVALID_KEY_RE.test(msg)) return t('errors.apiKeyInvalid')
   if (!msg) return opts?.fallback ? t(opts.fallback) : t('errors.unknown')
 
   if (NETWORK_RE.test(msg)) return t('errors.network')

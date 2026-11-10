@@ -517,7 +517,7 @@
             <input v-model.number="cfgForm.priority" class="input" type="number" min="0" max="999" />
             <span class="field-hint">{{ t('settings.cfg.priorityHint') }}</span>
           </label>
-          <label class="field"><span class="field-label">API Key</span><input v-model="cfgForm.api_key" class="input" type="password" placeholder="sk-..." /></label>
+          <label class="field"><span class="field-label">API Key</span><input v-model="cfgForm.api_key" class="input" type="password" placeholder="sk-..." /><span class="field-hint">{{ t('settings.cfg.apiKeyHint') }}</span></label>
           <label class="field"><span class="field-label">Base URL</span><input v-model="cfgForm.base_url" class="input" placeholder="https://..." /></label>
           <div class="field">
             <span class="field-label">{{ t('settings.cfg.models') }}</span>
@@ -547,9 +547,9 @@
             <input v-model="cfgForm.temperature" class="input" type="number" step="0.1" min="0" max="2" :placeholder="t('settings.cfg.tempPlaceholder')" />
             <span class="field-hint">{{ t('settings.cfg.tempNote') }}</span>
           </label>
-          <div v-if="cfgTestResult" class="test-result" :class="{ ok: cfgTestResult.reachable, bad: !cfgTestResult.reachable }">
+          <div v-if="cfgTestResult" class="test-result" :class="{ ok: cfgTestResult.reachable && !cfgTestResult.error_code, bad: !cfgTestResult.reachable || cfgTestResult.error_code }">
             <div class="test-result-head">
-              <span class="tag" :class="cfgTestResult.reachable ? 'tag-success' : 'tag-error'">{{ cfgTestResult.status || 'ERROR' }}</span>
+              <span class="tag" :class="cfgTestResult.reachable && !cfgTestResult.error_code ? 'tag-success' : 'tag-error'">{{ cfgTestResult.status || 'ERROR' }}</span>
               <span>{{ cfgTestResult.message }}</span>
             </div>
             <div class="mono test-result-url">{{ cfgTestResult.method }} {{ cfgTestResult.url }}</div>
@@ -889,7 +889,10 @@ async function testCfgPayload(payload) {
   cfgTesting.value = true
   try {
     cfgTestResult.value = await aiConfigAPI.test(payload)
-    if (cfgTestResult.value.reachable) toast.success(t('settings.cfg.reachable'))
+    if (cfgTestResult.value.error_code) {
+      cfgTestResult.value.message = t(`errors.${cfgTestResult.value.error_code}`)
+      toastError(cfgTestResult.value)
+    } else if (cfgTestResult.value.reachable) toast.success(t('settings.cfg.reachable'))
     else toast.warning(t('settings.cfg.unreachable'))
   } catch (e) {
     toastError(e)

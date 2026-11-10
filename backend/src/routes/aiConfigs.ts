@@ -6,6 +6,7 @@ import { toSnakeCase } from '../utils/transform.js'
 import { joinProviderUrl } from '../services/adapters/url.js'
 import { isOfficialProvider, parseConfigTemperature } from '../services/ai.js'
 import { redactUrl, logTaskError, logTaskProgress, logTaskSuccess } from '../utils/task-logger.js'
+import { assertApiKeyValue, getAiConfigurationError } from '../utils/ai-errors.js'
 
 const app = new Hono()
 
@@ -129,6 +130,8 @@ app.get('/', async (c) => {
 app.post('/', async (c) => {
   const body = await c.req.json()
   const ts = now()
+  try { assertApiKeyValue(body.api_key) }
+  catch (error) { return c.json({ code: 400, ...getAiConfigurationError(error) }, 400) }
 
   // 验证必填字段
   if (!body.service_type || !body.provider) {
@@ -170,6 +173,8 @@ app.post('/', async (c) => {
 // POST /ai-configs/test
 app.post('/test', async (c) => {
   const body = await c.req.json()
+  try { assertApiKeyValue(body.api_key) }
+  catch (error) { return c.json({ code: 400, ...getAiConfigurationError(error) }, 400) }
   if (!body.service_type || !body.provider || !body.base_url) {
     return badRequest(c, '需要 service_type、provider 与 base_url')
   }
@@ -196,6 +201,7 @@ app.post('/test', async (c) => {
     })
     const text = await resp.text()
     const reachable = [200, 204, 400, 401, 403].includes(resp.status)
+    const authenticationError = resp.ok ? undefined : getAiConfigurationError({ status: resp.status, message: text })
     const payload = {
       ok: resp.ok,
       reachable,
@@ -203,10 +209,11 @@ app.post('/test', async (c) => {
       status_text: resp.statusText,
       method: probe.method,
       url: probeUrl,
-      message: reachable
+      ...(authenticationError ? { error_code: authenticationError.error_code } : {}),
+      message: authenticationError?.message || (reachable
         ? (resp.ok ? '端点可访问，认证与路径基本正常' : '端点已响应，请根据状态码判断认证或路径是否正确')
-        : '端点未按预期响应，请检查 Base URL 和代理前缀',
-      response_preview: text.slice(0, 240),
+        : '端点未按预期响应，请检查 Base URL 和代理前缀'),
+      response_preview: authenticationError ? '' : text.slice(0, 240),
     }
     if (reachable) {
       logTaskSuccess('AIConfig', 'probe-done', {
@@ -251,6 +258,10 @@ app.get('/:id', async (c) => {
 app.put('/:id', async (c) => {
   const id = Number(c.req.param('id'))
   const body = await c.req.json()
+  if ('api_key' in body) {
+    try { assertApiKeyValue(body.api_key) }
+    catch (error) { return c.json({ code: 400, ...getAiConfigurationError(error) }, 400) }
+  }
   const [existing] = await db.select().from(schema.aiServiceConfigs).where(eq(schema.aiServiceConfigs.id, id))
   if (!existing) return notFound(c)
 

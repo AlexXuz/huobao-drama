@@ -425,7 +425,8 @@
       "reachable": "エンドポイントが応答しました",
       "unreachable": "エンドポイントのテストに失敗しました",
       "providerRequired": "プロバイダーを選択してください",
-      "tempInvalid": "Temperature は 0〜2 の数値で入力してください"
+      "tempInvalid": "Temperature は 0〜2 の数値で入力してください",
+      "apiKeyHint": "URL ではなく、プロバイダーが発行したキーを入力します。API の URL は下の Base URL に入力してください。"
     },
     "styleDialog": {
       "editTitle": "スタイルプリセットを編集",
@@ -908,7 +909,9 @@
     "timeout": "生成がタイムアウトしました。再試行してください",
     "moderation": "コンテンツが審査を通過しませんでした。プロンプトを調整するかモデルを切り替えて再試行してください",
     "requestFailed": "リクエストに失敗しました（{status}）",
-    "unknown": "操作に失敗しました。再試行してください"
+    "unknown": "操作に失敗しました。再試行してください",
+    "apiKeyLooksLikeUrl": "API Key に URL が入力されています。URL は Base URL に移し、プロバイダーの API キーを入力してください。",
+    "apiKeyInvalid": "API キーが無効か期限切れです。設定 → AI サービスでキーと Base URL を確認してください。"
   },
   "tour": {
     "next": "次へ",

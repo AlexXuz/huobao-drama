@@ -19,6 +19,7 @@ import { loadAgentPromptFile, loadBasePromptFile } from './prompts.js'
 import { buildLanguageDirective } from './language.js'
 import { getContentLanguageFromRC } from './context.js'
 import { getVoiceReferenceInstructions } from './voice-reference-instructions.js'
+import { assertApiKeyValue } from '../utils/ai-errors.js'
 
 // Default prompts (used when workspace/prompts/<type>.md 文件缺失时兜底)
 export const DEFAULT_PROMPTS: Record<string, { name: string; instructions: string }> = {
@@ -295,6 +296,7 @@ function createMaxTokensFetch(providerName: string, inner?: typeof fetch): typeo
 async function getModel(fileModel: string | undefined, modelOverride?: string, textConfigId?: number) {
   // 请求可指定文本配置（含其 provider/baseUrl/apiKey），否则回退到当前启用配置
   const textConfig = (textConfigId ? await getConfigById(textConfigId) : null) || await getTextConfig()
+  assertApiKeyValue(textConfig.apiKey)
   const modelName = modelOverride || fileModel || textConfig.model
   const providerName = textConfig.provider.toLowerCase()
   const resolvedBaseURL = getTextProviderBaseUrl(textConfig)

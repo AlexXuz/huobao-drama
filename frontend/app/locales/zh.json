@@ -433,7 +433,8 @@
       "reachable": "端点已响应",
       "unreachable": "端点未通过测试",
       "providerRequired": "选择服务商",
-      "tempInvalid": "Temperature 需为 0~2 的数字"
+      "tempInvalid": "Temperature 需为 0~2 的数字",
+      "apiKeyHint": "填写服务商提供的密钥，不是网址；接口地址请填在下方 Base URL。"
     },
     "styleDialog": {
       "editTitle": "编辑风格预设",
@@ -916,7 +917,9 @@
     "timeout": "生成超时，请重试",
     "moderation": "内容未通过审核，请调整提示词或切换模型后重试",
     "requestFailed": "请求失败（{status}）",
-    "unknown": "操作失败，请重试"
+    "unknown": "操作失败，请重试",
+    "apiKeyLooksLikeUrl": "API Key 中填入了网址。请把网址填入 Base URL，并填写服务商提供的 API 密钥。",
+    "apiKeyInvalid": "API Key 无效或已失效。请在设置 → AI 服务中检查密钥与 Base URL。"
   },
   "tour": {
     "next": "下一步",

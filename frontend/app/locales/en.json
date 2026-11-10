@@ -425,7 +425,8 @@
       "reachable": "Endpoint responded",
       "unreachable": "Endpoint failed the test",
       "providerRequired": "Select a provider",
-      "tempInvalid": "Temperature must be a number between 0 and 2"
+      "tempInvalid": "Temperature must be a number between 0 and 2",
+      "apiKeyHint": "Enter the key issued by your provider, not a URL. Put the API endpoint in Base URL below."
     },
     "styleDialog": {
       "editTitle": "Edit Style Preset",
@@ -908,7 +909,9 @@
     "timeout": "Generation timed out. Please try again.",
     "moderation": "Content was blocked by moderation. Adjust the prompt or switch models and retry.",
     "requestFailed": "Request failed ({status})",
-    "unknown": "Operation failed. Please try again."
+    "unknown": "Operation failed. Please try again.",
+    "apiKeyLooksLikeUrl": "The API Key field contains a URL. Put the URL in Base URL and enter the API key from your provider.",
+    "apiKeyInvalid": "The API key is invalid or expired. Check the key and Base URL in Settings → AI Services."
   },
   "tour": {
     "next": "Next",
