@@ -383,6 +383,7 @@ async function pollTask(record: SysTaskRecord, config: AIConfig, taskId: string)
   const adapter = type === 'image' ? getImageAdapter(config.provider) : getVideoAdapter(config.provider)
   const startedAt = Date.now()
 
+  let consecutiveFailures = 0
   for (let i = 0; i < profile.attempts; i++) {
     if (profile.maxDurationMs && Date.now() - startedAt >= profile.maxDurationMs) {
       await failTask(record.id, 'Timeout: Polling exceeded 10 minutes')
@@ -407,7 +408,24 @@ async function pollTask(record: SysTaskRecord, config: AIConfig, taskId: string)
         headers,
         signal: AbortSignal.timeout(remainingMs),
       })
-      if (!resp.ok) continue
+      if (!resp.ok) {
+        const rawBody = await resp.text().catch(() => "")
+        const body = safeTaskError(rawBody.slice(0, 500))
+        const gone = resp.status === 404 || body.includes("task 不存在") || body.includes("not_found")
+        if (gone) {
+          logTaskError(label, "poll-not-found", { id: record.id, taskId, attempt: i + 1, status: resp.status, body })
+          await failTask(record.id, "视频任务在网关侧不存在（HTTP 404），已停止轮询")
+          return
+        }
+        consecutiveFailures += 1
+        logTaskWarn(label, "poll-http-error", { id: record.id, taskId, attempt: i + 1, status: resp.status, failures: consecutiveFailures, body })
+        if (consecutiveFailures >= 5) {
+          await failTask(record.id, `轮询连续失败 ${consecutiveFailures} 次，最后一次 HTTP ${resp.status}：${body || "无响应体"}`)
+          return
+        }
+        continue
+      }
+      consecutiveFailures = 0
       const result = await resp.json() as any
 
       // 图片/视频 PollResponse 结构不同，这里统一按 any 取值后按 type 分支
@@ -435,6 +453,10 @@ async function pollTask(record: SysTaskRecord, config: AIConfig, taskId: string)
         } else if (pollResp.videoUrl) {
           logTaskSuccess(label, 'poll-complete', { id: record.id, taskId, videoUrl: pollResp.videoUrl })
           await handleVideoComplete(record, pollResp.videoUrl, pollResp.duration)
+          return
+        } else {
+          // 视频已完成但网关未返回视频地址：异常终态，立即失败，不继续轮询
+          await failTask(record.id, "网关返回已完成但没有视频地址", "generation_failed")
           return
         }
       }

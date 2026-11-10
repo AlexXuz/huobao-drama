@@ -5,9 +5,11 @@ import fs from 'node:fs/promises'
 import { db, getInsertId, schema } from '../db/index.js'
 import { success, created, badRequest, notFound, now } from '../utils/response.js'
 import { AUDIO_MAX_BYTES, AudioUploadError, saveAudioUpload } from '../utils/audio-upload.js'
-import { getAbsolutePath } from '../utils/storage.js'
+import { getAbsolutePath, saveUploadedFile } from '../utils/storage.js'
 import { toSnakeCase } from '../utils/transform.js'
 import { generateImage } from '../services/generation.js'
+import { getActiveConfig, getConfigById } from '../services/ai.js'
+import { generateSpeech, OPENAI_TTS_VOICES } from '../services/tts.js'
 import { getDramaStylePrompt } from '../services/style-preset.js'
 import { ensureCharacterFinalPrompt } from '../services/final-prompt.js'
 import { logTaskError, logTaskStart, logTaskSuccess } from '../utils/task-logger.js'
@@ -55,6 +57,45 @@ app.delete('/:id/voice', async c => {
   if (!updated) return notFound(c, '角色不存在')
   return success(c, { voice_audio_url: null, voice_audio_name: null })
 })
+// POST /characters/:id/voice/generate — 用 OpenAI TTS 生成角色音色，保存为角色音频
+app.post('/:id/voice/generate', async (c) => {
+  const id = Number(c.req.param('id'))
+  if (!Number.isSafeInteger(id) || id <= 0) return badRequest(c, '角色编号无效')
+  const condition = and(eq(schema.characters.id, id), isNull(schema.characters.deletedAt))
+  const [char] = await db.select().from(schema.characters).where(condition)
+  if (!char) return notFound(c, '角色不存在')
+  const body = await c.req.json()
+  const text = typeof body.text === 'string' ? body.text : ''
+  if (!text.trim()) return badRequest(c, '试音文本必填')
+  if (text.length > 4096) return badRequest(c, '试音文本不能超过 4096 字')
+  const voice = typeof body.voice === 'string' && body.voice ? body.voice : 'alloy'
+  if (!(OPENAI_TTS_VOICES as readonly string[]).includes(voice)) return badRequest(c, '不支持的音色')
+  let savedPath: string | undefined
+  try {
+    const config = body.config_id ? await getConfigById(Number(body.config_id)) : await getActiveConfig('audio')
+    if (!config) throw new Error('未配置语音模型，请先到「设置」页添加并启用 AI 服务')
+    if (config.provider.toLowerCase() !== 'openai') throw new Error('当前语音配置不是 OpenAI 官方，暂不支持')
+    logTaskStart('CharacterVoice', 'generate', { characterId: id, voice })
+    const audio = await generateSpeech({ config, model: body.model || undefined, voice, input: text })
+    savedPath = await saveUploadedFile(audio, 'uploads', 'voice.mp3')
+    const voiceAudioName = `${char.name}-tts-1-${voice}.mp3`
+    const updated = await db.update(schema.characters)
+      .set({ voiceAudioUrl: savedPath, voiceAudioName, updatedAt: now() })
+      .where(condition)
+      .returning({ id: schema.characters.id }).get()
+    if (!updated) {
+      await fs.unlink(getAbsolutePath(savedPath))
+      return notFound(c, '角色不存在')
+    }
+    logTaskSuccess('CharacterVoice', 'generate', { characterId: id, voice, voiceAudioUrl: savedPath })
+    return success(c, { voice_audio_url: savedPath, voice_audio_name: voiceAudioName })
+  } catch (err: any) {
+    if (savedPath) await fs.unlink(getAbsolutePath(savedPath)).catch(() => {})
+    logTaskError('CharacterVoice', 'generate', { characterId: id, error: err?.message || err })
+    return badRequest(c, err?.message || '语音生成失败')
+  }
+})
+
 
 // POST /characters — 手动新增角色（传入 episode_id 时关联到该集）
 app.post('/', async (c) => {

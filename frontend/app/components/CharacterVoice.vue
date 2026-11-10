@@ -7,7 +7,29 @@
         <Upload v-else :size="12" />
         {{ busy ? t('characterVoice.saving') : voiceUrl ? t('characterVoice.replace') : t('characterVoice.upload') }}
       </button>
+      <button type="button" class="btn btn-sm" :disabled="busy" @click="toggleGenerate">
+        {{ t('characterVoice.generate') }}
+      </button>
       <input ref="fileInput" class="voice-file-input" type="file" accept=".mp3,.wav,.m4a,.aac,audio/mpeg,audio/wav,audio/mp4,audio/aac" :disabled="busy" :aria-label="t('characterVoice.upload')" @change="upload" />
+    </div>
+    <div v-if="showGenerate" class="voice-generate">
+      <label class="voice-generate-field">
+        <span>{{ t('characterVoice.voiceLabel') }}</span>
+        <select v-model="generateVoiceName" class="input" :disabled="busy">
+          <option v-for="voice in generateVoices" :key="voice" :value="voice">{{ voice }}</option>
+        </select>
+      </label>
+      <label class="voice-generate-field">
+        <span>{{ t('characterVoice.textLabel') }}</span>
+        <input v-model="generateText" type="text" :placeholder="t('characterVoice.textPlaceholder')" :disabled="busy" />
+      </label>
+      <div class="voice-generate-actions">
+        <button type="button" class="btn btn-sm btn-primary" :disabled="busy || !generateText.trim()" @click="generate">
+          <Loader2 v-if="busy" :size="12" class="animate-spin" />
+          {{ busy ? t('characterVoice.generating') : t('characterVoice.generate') }}
+        </button>
+        <button type="button" class="btn btn-sm" :disabled="busy" @click="showGenerate = false">{{ t('common.cancel') }}</button>
+      </div>
     </div>
     <template v-if="voiceUrl">
       <div class="voice-file-row">
@@ -46,6 +68,15 @@ const fileInput = ref<HTMLInputElement | null>(null)
 const busyIds = useState<number[]>('character-voice-busy', () => [])
 const busy = computed(() => busyIds.value.includes(props.character.id))
 const playbackError = ref(false)
+const generateVoices = ['alloy', 'echo', 'fable', 'onyx', 'nova', 'shimmer'] as const
+const showGenerate = ref(false)
+const generateVoiceName = ref<string>('alloy')
+const generateText = ref('')
+
+function toggleGenerate() {
+  showGenerate.value = !showGenerate.value
+  if (showGenerate.value && !generateText.value) generateText.value = `你好，我是${props.character.name}。`
+}
 const voiceUrl = computed(() => {
   const value = props.character.voice_audio_url ?? props.character.voiceAudioUrl ?? ''
   return value && !value.startsWith('/') && !/^https?:\/\//i.test(value) ? `/${value}` : value
@@ -71,6 +102,23 @@ async function upload(event: Event) {
     toastError(error)
   } finally {
     busyIds.value = busyIds.value.filter(value => value !== id)
+  }
+}
+
+async function generate() {
+  const id = props.character.id
+  const text = generateText.value.trim()
+  if (!text || busy.value) return
+  busyIds.value = [...busyIds.value, id]
+  try {
+    const voice = await characterAPI.generateVoice(id, { text, voice: generateVoiceName.value })
+    emit('updated', id, voice)
+    toast.success(t('characterVoice.generated'))
+    showGenerate.value = false
+  } catch (error) {
+    toastError(error)
+  } finally {
+    busyIds.value = busyIds.value.filter(v => v !== id)
   }
 }
 
@@ -115,4 +163,7 @@ function onPlay(event: Event) {
 .voice-hint { color: var(--text-2); }
 .voice-formats { color: var(--text-3); }
 .voice-error { color: var(--action-danger); }
+.voice-generate { display: flex; flex-direction: column; gap: 8px; }
+.voice-generate-field { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--text-2); }
+.voice-generate-actions { display: flex; gap: 8px; }
 </style>

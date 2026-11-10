@@ -6,7 +6,7 @@ import { eq } from 'drizzle-orm'
 import { logTaskProgress, logTaskWarn } from '../utils/task-logger.js'
 import { joinProviderUrl } from './adapters/url.js'
 
-export type ServiceType = 'text' | 'image' | 'video'
+export type ServiceType = 'text' | 'image' | 'video' | 'audio'
 
 export interface AIConfig {
   id?: number
@@ -32,7 +32,8 @@ export function parseConfigTemperature(settingsRaw: string | null | undefined): 
 export const officialProviders: Record<ServiceType, readonly string[]> = {
   text: ['openai', 'gemini', 'volcengine'],
   image: ['openai', 'gemini', 'volcengine'],
-  video: ['volcengine', 'minimax', 'aliyun'],
+  video: ['volcengine', 'minimax', 'aliyun', 'openai'],
+  audio: ['openai'],
 }
 
 export function isOfficialProvider(serviceType?: string | null, provider?: string | null): boolean {
@@ -100,6 +101,12 @@ export async function getActiveConfig(serviceType: ServiceType): Promise<AIConfi
 export async function getTextConfig(): Promise<AIConfig> {
   const config = await getActiveConfig('text')
   if (!config) throw new Error('未配置文本模型，请先到「设置」页添加并启用 AI 服务')
+  return config
+}
+
+export async function getAudioConfig(): Promise<AIConfig> {
+  const config = await getActiveConfig('audio')
+  if (!config) throw new Error('未配置语音模型，请先到「设置」页添加并启用 AI 服务')
   return config
 }
 
