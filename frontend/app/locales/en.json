@@ -964,5 +964,12 @@
         "desc": "Click this \"?\" button to replay this page's guide. Happy creating!"
       }
     }
+  },
+  "auth": {
+    "signedInAs": "Signed in as {user}",
+    "signOut": "Sign out",
+    "signingOut": "Signing out…",
+    "logoutFailed": "Could not sign out. Please try again.",
+    "loginRequired": "Your session has expired. Please sign in again."
   }
 }

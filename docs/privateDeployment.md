@@ -18,33 +18,59 @@ FFPROBE_BIN=/usr/bin/ffprobe
 
 首次部署将 `backend/workspace` 复制到持久目录，运行用户应只有自身数据目录的写入权限。使用独立的非 root 系统用户、systemd 自动重启和内存限额；应用源码只读。不要将密钥、数据库或生成素材提交到 Git。
 
-## 登录保护
+## 普通网页登录
 
-应用本身没有用户鉴权，必须经 HTTPS 反向代理访问。代理认证覆盖**整个站点**，包含 API、SSE、上传和 `/static/*`，不得为健康检查或媒体公开例外。后端只监听回环地址，外部只能经代理访问。
+应用经 HTTPS 反向代理和共享 `webAuth` 服务访问，使用页面上的账号密码表单登录，不使用浏览器 BasicAuth 弹窗。认证覆盖**整个应用站点**，包含 API、SSE、上传和 `/static/*`，不得为健康检查或媒体公开例外。应用后端及认证服务均只监听回环地址。
 
-以 Caddy 2.6 为例（2.8 及以后将 `basicauth` 改为 `basic_auth`）：
+请求路径：
 
-```caddyfile
-drama.example.com {
-    basicauth {
-        yourUser YOUR_BCRYPT_HASH
-    }
-    @crossOrigin {
-        header Origin *
-        not header Origin https://drama.example.com
-    }
-    respond @crossOrigin "Cross-origin requests are not allowed." 403
-    @update path_regexp updates (?i)^/api/v1/server-update(/|$)
-    respond @update "Updates are managed through server deployment." 403
-    reverse_proxy 127.0.0.1:5679 {
-        header_up -Authorization
-        header_down Cache-Control "private, no-store"
-        flush_interval -1
-    }
-}
+```text
+浏览器 → HTTPS Caddy
+  /auth/login、/auth/logout、/auth/session → webAuth（127.0.0.1:3080）
+  其他路径 → forward_auth /internal/verify → 火宝（127.0.0.1:5679）
 ```
 
-密码使用 Caddy 的 `hash-password` 生成哈希，配置中不保存明文。应用中的 AI 配置接口会返回已保存的模型密钥，因此不能只保护首页。更新接口由代理禁用，以便通过 fork 的代码进行发布。
+`/internal/verify` 仅供 Caddy 内部调用，不作为公网认证旁路。Caddy 固定注入站点标识、主机名、协议和客户端地址，不信任浏览器传入的同名请求头；同时限制跨来源写入，并继续禁用应用内自动更新接口。完整模板见 [`deployment/webAuth/Caddyfile.example`](../deployment/webAuth/Caddyfile.example)，部署时应同时修改模板和认证配置中的域名。
+
+两站共用认证服务和账号，Cookie 与会话各自绑定站点；在一站登录或退出不会自动改变另一站的会话。这不是跨域单点登录。
+
+### 认证服务
+
+- 实现：[`deployment/webAuth/server.mjs`](../deployment/webAuth/server.mjs)，使用 Node.js 内置模块，无新增应用依赖。
+- systemd 单元：[`deployment/webAuth/manjuAuth.service`](../deployment/webAuth/manjuAuth.service)，独立系统用户 `manjuauth`，监听 `127.0.0.1:3080`。
+- `AUTH_CONFIG_FILE=/etc/manju-auth/config.json`：用户名、scrypt 盐与密码哈希、允许的站点域名；不保存明文密码，不提交此文件到 Git。
+- `AUTH_DATA_DIR=/var/lib/manju-auth`：持久化会话，目录权限 `0700`、会话文件 `0600`，应用数据目录与该服务隔离。
+- 登录成功签发 `__Host-manjuSession`，有效期 7 天，带 `Secure`、`HttpOnly`、`SameSite=Lax`、`Path=/`，不设置 `Domain`。服务器存储令牌摘要；重新登录会轮换旧会话，退出立即撤销当前会话。
+- 登录表单校验 CSRF Cookie、同源 Origin，并限制密码尝试频率；登录回跳仅允许安全的本站相对路径。认证失败不返回 `WWW-Authenticate`。
+
+### 前端契约
+
+| 请求 | 行为 |
+| --- | --- |
+| `GET /auth/login?next=...` | 显示普通登录表单；`next` 由服务端校验。 |
+| `POST /auth/login` | 提交用户名、密码、CSRF 和 `next`；成功后设置 Cookie，以 303 返回原页面。 |
+| `GET /auth/session` | 已登录返回 200 和 `{ "authenticated": true, "user": "..." }`；未登录返回 401 和 `authenticated: false`。 |
+| `POST /auth/logout` | 浏览器同源请求自动携带 Cookie 与 Origin；成功撤销会话、清除 Cookie，返回 204。 |
+| 未登录的受保护 API | 返回 401 和 `error_code: "loginRequired"`，不会触发浏览器密码弹窗。 |
+| 未登录的页面导航 | 303 跳转 `/auth/login`，保留安全的当前相对路径以便登录后返回。 |
+
+火宝通过真实 `/auth/session` 响应决定是否显示右上角用户名和“退出登录”。桌面版跳过探测；未部署网关的开发环境不显示无效的退出入口。退出成功后进入登录页。
+
+API 客户端只有收到 **HTTP 401 且 `error_code` 为 `loginRequired`** 才跳转登录。上游模型密钥错误属于应用配置错误（例如 HTTP 400 携带 `apiKeyInvalid`），不能使用户退出网页登录。登录密码与 AI API Key 是不同凭据。
+
+应用中的 AI 配置接口会返回已保存的模型密钥，因此不能只保护首页。更新接口仍由代理禁用，以便通过 fork 的代码发布。
+
+### 验证与发布
+
+在本机运行认证服务的实际 HTTP 回归：
+
+```sh
+node deployment/webAuth/server.test.mjs
+```
+
+该脚本使用临时目录与专用本地账号，检查登录、Cookie 属性、CSRF、跨站会话隔离、重启后会话保留、会话轮换、退出、过期、安全回跳和限频；不要使用生产凭据运行测试。
+
+发布前另用全新浏览器会话验证：匿名深链接进入登录页、登录回到原页面、刷新保持登录、右上角退出后 API 重新拒绝访问。只更新登录入口等前端功能时，可替换 `frontend/.output/public` 静态产物，无须重启正在执行生成任务的应用后端。
 
 ## 模型及素材
 

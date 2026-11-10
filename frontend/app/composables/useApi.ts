@@ -1,3 +1,5 @@
+import { handleGatewayLoginRequired } from './useGatewaySession'
+
 const BASE = '/api/v1'
 
 async function req<T = any>(method: string, path: string, body?: any): Promise<T> {
@@ -10,6 +12,7 @@ async function req<T = any>(method: string, path: string, body?: any): Promise<T
   try {
     const resp = await fetch(`${BASE}${path}`, opts)
     const json = await resp.json()
+    handleGatewayLoginRequired(resp.status, json)
     const ms = Math.round(performance.now() - start)
 
     if (!resp.ok || (json.code && json.code >= 400)) {
@@ -121,6 +124,7 @@ async function uploadReq<T = any>(path: string, file: File): Promise<T> {
   console.log(`%c[API] %cPOST %c${path} %c${file.name}`, 'color:#888', 'color:#4fc3f7;font-weight:bold', 'color:#ccc', 'color:#888')
   const resp = await fetch(`${BASE}${path}`, { method: 'POST', body: fd })
   const json = await resp.json()
+  handleGatewayLoginRequired(resp.status, json)
   if (!resp.ok || (json.code && json.code >= 400)) {
     console.log(`%c[API] %cPOST ${path} %c${resp.status}`, 'color:#888', 'color:#ef5350', 'color:#ef5350;font-weight:bold')
     throw new Error(json.message || `${resp.status}`)

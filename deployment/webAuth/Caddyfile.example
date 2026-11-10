@@ -1,0 +1,126 @@
+# Replace hosts here and in the authentication configuration.
+# Backends and the authentication service must listen on loopback only.
+
+toonflow.example.com {
+    encode zstd gzip
+    header {
+        X-Content-Type-Options nosniff
+        Referrer-Policy same-origin
+        X-Frame-Options SAMEORIGIN
+    }
+    request_body {
+        max_size 536870912
+    }
+    @authUi path /auth/login /auth/logout /auth/session
+    @crossOrigin {
+        header Origin *
+        not header Origin https://toonflow.example.com
+    }
+    @crossSiteWrite {
+        header Sec-Fetch-Site cross-site
+        not method GET HEAD OPTIONS
+    }
+    @managed {
+        path_regexp blocked3000 (?i)^/(api/(v1/server-update|channel|desktop/update|mobileLink|multiTenant)(/|$)|mcp(/|$)|a2a(/|$))
+        not path_regexp session3000 (?i)^/api/multiTenant/user/session/?$
+    }
+    route {
+        respond @crossOrigin "Cross-origin requests are not allowed." 403
+        respond @crossSiteWrite "Cross-site writes are not allowed." 403
+        reverse_proxy @authUi 127.0.0.1:3080 {
+            header_up X-Manju-Site toonflow
+            header_up X-Manju-Host toonflow.example.com
+            header_up X-Manju-Proto https
+            header_up X-Manju-Client-IP {remote_host}
+            header_up -Authorization
+            transport http {
+                dial_timeout 2s
+                response_header_timeout 5s
+            }
+        }
+        forward_auth 127.0.0.1:3080 {
+            uri /internal/verify
+            header_up X-Manju-Site toonflow
+            header_up X-Manju-Host toonflow.example.com
+            header_up X-Manju-Proto https
+            header_up X-Manju-Client-IP {remote_host}
+            header_up -Authorization
+            transport http {
+                dial_timeout 2s
+                response_header_timeout 5s
+            }
+        }
+        respond @managed "This feature is disabled in the private deployment." 403
+        reverse_proxy 127.0.0.1:3000 {
+            header_up -Authorization
+            header_down Cache-Control "private, no-store"
+            flush_interval -1
+            transport http {
+                dial_timeout 5s
+                response_header_timeout 660s
+            }
+        }
+    }
+}
+
+huobao.example.com {
+    encode zstd gzip
+    header {
+        X-Content-Type-Options nosniff
+        Referrer-Policy same-origin
+        X-Frame-Options SAMEORIGIN
+    }
+    request_body {
+        max_size 536870912
+    }
+    @authUi path /auth/login /auth/logout /auth/session
+    @crossOrigin {
+        header Origin *
+        not header Origin https://huobao.example.com
+    }
+    @crossSiteWrite {
+        header Sec-Fetch-Site cross-site
+        not method GET HEAD OPTIONS
+    }
+    @managed {
+        path_regexp blocked5679 (?i)^/(api/(v1/server-update|channel|desktop/update|mobileLink|multiTenant)(/|$)|mcp(/|$)|a2a(/|$))
+        not path_regexp session5679 (?i)^/api/multiTenant/user/session/?$
+    }
+    route {
+        respond @crossOrigin "Cross-origin requests are not allowed." 403
+        respond @crossSiteWrite "Cross-site writes are not allowed." 403
+        reverse_proxy @authUi 127.0.0.1:3080 {
+            header_up X-Manju-Site huobao
+            header_up X-Manju-Host huobao.example.com
+            header_up X-Manju-Proto https
+            header_up X-Manju-Client-IP {remote_host}
+            header_up -Authorization
+            transport http {
+                dial_timeout 2s
+                response_header_timeout 5s
+            }
+        }
+        forward_auth 127.0.0.1:3080 {
+            uri /internal/verify
+            header_up X-Manju-Site huobao
+            header_up X-Manju-Host huobao.example.com
+            header_up X-Manju-Proto https
+            header_up X-Manju-Client-IP {remote_host}
+            header_up -Authorization
+            transport http {
+                dial_timeout 2s
+                response_header_timeout 5s
+            }
+        }
+        respond @managed "This feature is disabled in the private deployment." 403
+        reverse_proxy 127.0.0.1:5679 {
+            header_up -Authorization
+            header_down Cache-Control "private, no-store"
+            flush_interval -1
+            transport http {
+                dial_timeout 5s
+                response_header_timeout 660s
+            }
+        }
+    }
+}

@@ -10,7 +10,7 @@
 import { toast } from 'vue-sonner'
 import { i18n } from '~/composables/i18n'
 
-const t = (key: string, params?: Record<string, unknown>) => i18n.global.t(key, params)
+const t = (key: string, params?: Record<string, unknown>) => i18n.global.t(key, params ?? {})
 
 /** 内容审核特征（从 episode.vue 的 videoModerationHint 上移，全站复用） */
 export const MODERATION_RE = /sensitive|moderation|真人|人脸|real[\s_-]?person|审核|内容.*(违规|不合规|未通过)|content[\s_-]?policy|risk[\s_-]?control|violation|blocked/i
@@ -41,6 +41,7 @@ function messageOf(err: unknown): string {
 export function mapError(err: unknown, opts?: { fallback?: string }): string {
   const msg = messageOf(err).trim()
   const errorCode = err && typeof err === 'object' ? (err as { error_code?: unknown }).error_code : undefined
+  if (errorCode === 'loginRequired') return t('auth.loginRequired')
   if (errorCode === 'apiKeyLooksLikeUrl' || errorCode === 'apiKeyInvalid') return t(`errors.${errorCode}`)
   if (msg === 'apiKeyLooksLikeUrl' || msg === 'apiKeyInvalid') return t(`errors.${msg}`)
   if (INVALID_KEY_RE.test(msg)) return t('errors.apiKeyInvalid')

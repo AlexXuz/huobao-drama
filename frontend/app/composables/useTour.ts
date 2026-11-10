@@ -9,6 +9,7 @@
  */
 import { driver } from 'driver.js'
 import 'driver.js/dist/driver.css'
+import { handleGatewayLoginRequired } from './useGatewaySession'
 
 const SEEN_KEY = 'huobao:tours'
 
@@ -34,6 +35,7 @@ export function hydrateTours(): Promise<void> {
     try {
       const res = await fetch('/api/v1/settings/tours-seen')
       const json = await res.json().catch(() => null)
+      if (handleGatewayLoginRequired(res.status, json)) return
       const server: string[] = Array.isArray(json?.data?.seen) ? json.data.seen : []
       seenSet = new Set([...server, ...readLocal()])
     } catch {
@@ -58,11 +60,12 @@ export function markTourSeen(id: string) {
     try {
       if (!hydrated) await hydrateTours()
       seenSet.add(id)
-      await fetch('/api/v1/settings/tours-seen', {
+      const response = await fetch('/api/v1/settings/tours-seen', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ seen: [...seenSet] }),
       })
+      if (response.status === 401) handleGatewayLoginRequired(response.status, await response.json().catch(() => null))
     } catch { /* 服务端不可达时 localStorage 已兜底 */ }
   })()
 }

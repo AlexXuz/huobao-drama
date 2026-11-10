@@ -39,6 +39,13 @@
         </a>
         <ThemeToggle />
         <LocaleSwitcher />
+        <div v-if="gatewayUser" class="gateway-session" :title="t('auth.signedInAs', { user: gatewayUser })">
+          <span class="gateway-user">{{ gatewayUser }}</span>
+          <button type="button" class="btn btn-ghost btn-sm" :disabled="gatewayLoggingOut" @click="signOut">
+            <LogOut :size="14" aria-hidden="true" />
+            {{ gatewayLoggingOut ? t('auth.signingOut') : t('auth.signOut') }}
+          </button>
+        </div>
       </div>
     </header>
 
@@ -56,14 +63,22 @@
 </template>
 
 <script setup>
-import { LayoutGrid, Settings, TriangleAlert, Github } from 'lucide-vue-next'
+import { LayoutGrid, Settings, TriangleAlert, Github, LogOut } from 'lucide-vue-next'
 import { useI18n } from 'vue-i18n'
 import { aiConfigAPI } from '~/composables/useApi'
+import { useGatewaySession } from '~/composables/useGatewaySession'
+import { toast } from 'vue-sonner'
 import brandLogo from '~/assets/brand-logo.png'
 
 const { t, locale } = useI18n()
 const route = useRoute()
 const showBrandImage = ref(true)
+const { gatewayUser, gatewayLoggingOut, refreshGatewaySession, logoutGatewaySession } = useGatewaySession()
+
+async function signOut() {
+  try { await logoutGatewaySession() }
+  catch { toast.error(t('auth.logoutFailed')) }
+}
 
 // 渲染时求值，语言切换即时生效（不能模块级常量固化）
 const SERVICE_TYPE_LABELS = computed(() => ({
@@ -84,6 +99,7 @@ async function checkAiConfigs() {
 }
 
 onMounted(checkAiConfigs)
+onMounted(() => { void refreshGatewaySession() })
 // 设置页保存配置后返回时重新检查(布局跨页面复用,onMounted 只触发一次)
 watch(() => route.path, checkAiConfigs)
 // 切换界面语言时横幅中已拼接的类型文案需要重算
@@ -169,6 +185,12 @@ watch(locale, checkAiConfigs)
 .header-right {
   margin-left: auto;
   display: flex; align-items: center;
+}
+.gateway-session { display: flex; align-items: center; gap: 8px; margin-left: 10px; }
+.gateway-user { max-width: 100px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-2); font-size: 12px; }
+@media (max-width: 780px) {
+  .gateway-user { display: none; }
+  .gateway-session { margin-left: 4px; }
 }
 /* GitHub 入口 — 与 ThemeToggle 同款圆形图标按钮 */
 .github-link {

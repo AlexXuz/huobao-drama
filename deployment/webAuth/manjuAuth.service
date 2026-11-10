@@ -1,0 +1,33 @@
+[Unit]
+Description=Private creative apps web login
+After=network-online.target
+
+[Service]
+Type=simple
+User=manjuauth
+Group=manjuauth
+WorkingDirectory=/opt/manju/webAuth
+Environment=AUTH_CONFIG_FILE=/etc/manju-auth/config.json
+Environment=AUTH_DATA_DIR=/var/lib/manju-auth
+Environment=PORT=3080
+ExecStart=/opt/manju/runtime/node-v24.22.1-linux-x64/bin/node /opt/manju/webAuth/server.mjs
+Restart=on-failure
+RestartSec=3
+UMask=0077
+StateDirectory=manju-auth
+StateDirectoryMode=0700
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+ReadWritePaths=/var/lib/manju-auth
+InaccessiblePaths=/var/lib/toonflow /var/lib/huobao /opt/common-ground /opt/englishstudy-child /opt/muse2api
+SocketBindDeny=any
+SocketBindAllow=ipv4:tcp:3080
+MemoryMax=192M
+MemorySwapMax=128M
+CPUQuota=50%
+TasksMax=64
+
+[Install]
+WantedBy=multi-user.target

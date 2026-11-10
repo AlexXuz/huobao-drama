@@ -972,5 +972,12 @@
         "desc": "点这个「?」按钮可重新播放本页引导。祝创作顺利！"
       }
     }
+  },
+  "auth": {
+    "signedInAs": "已登录：{user}",
+    "signOut": "退出登录",
+    "signingOut": "正在退出…",
+    "logoutFailed": "退出登录失败，请重试",
+    "loginRequired": "登录已过期，请重新登录"
   }
 }
