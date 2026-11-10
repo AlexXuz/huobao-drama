@@ -167,6 +167,7 @@ No config files — everything is set via environment variables (all have defaul
 |---|---|---|
 | `SQLITE_PATH` |`<仓库根>/data/huobao.sqlite3`<br>`<repo>/data/huobao.sqlite3`|SQLite 数据库文件位置<br>SQLite database file location|
 | `PORT` | `5679` |后端服务端口<br>Backend service port|
+| `HOST` | `0.0.0.0` |监听地址；通过反向代理部署时设置 `127.0.0.1`，并在代理启用登录保护<br>Bind address; use `127.0.0.1` behind an authenticated reverse proxy|
 | `STORAGE_PATH` |`<仓库根>/data/static`<br>`<repo>/data/static`|生成文件存储目录<br>Generated-file storage directory|
 | `HUOBAO_DATA_DIR` | — |桌面版由 Electron 主进程注入（userData 数据根）<br>Injected by the Electron main process (userData data root)|
 | `WORKSPACE_PATH` | `backend/workspace` |Agent 技能/提示词目录（桌面版指向 userData 可写副本）<br>Agent skills/prompts directory (desktop: writable copy under userData)|

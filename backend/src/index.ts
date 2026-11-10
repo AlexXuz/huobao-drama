@@ -74,7 +74,7 @@ app.route('/api/v1', api)
 // 生成的图片/视频按 uuid 命名、内容不变，标记为 immutable 让浏览器长缓存
 app.use('/static/*', async (c, next) => {
   await next()
-  if (c.res.ok) c.header('Cache-Control', 'public, max-age=31536000, immutable')
+  if (c.res.ok) c.header('Cache-Control', 'private, max-age=31536000, immutable')
 })
 app.use('/static/*', serveStatic({ root: DATA_ROOT }))
 
@@ -84,8 +84,9 @@ app.use('*', serveStatic({ root: distPath }))
 app.get('*', serveStatic({ root: distPath, path: 'index.html' }))
 
 const port = Number(process.env.PORT || 5679)
-console.log(`🚀 Huobao Drama TS server on http://localhost:${port}`)
+const hostname = process.env.HOST || '0.0.0.0'
+console.log(`🚀 Huobao Drama TS server on http://${hostname}:${port}`)
 
 await resumeInterruptedTasks()
 
-serve({ fetch: app.fetch, port })
+serve({ fetch: app.fetch, port, hostname })
