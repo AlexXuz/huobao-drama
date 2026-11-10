@@ -74,6 +74,10 @@ node deployment/webAuth/server.test.mjs
 
 ## 模型及素材
 
+文本生成选择 `gpt-6.1-terra` 或 `gpt-6-luna` 时固定关闭推理：Chat Completions 发送 `reasoning_effort: "none"`，Responses 发送 `reasoning: { effort: "none" }`。该规则在 SDK 序列化及通用中转补丁之后执行，不受 `AI_DISABLE_THINKING` 或 `AI_THINKING_OFF_PATCH` 覆盖。官方接口会将这两个模型的显示名（如 `GPT-6 Luna`）转换为标准模型 ID；中转接口保留原模型 ID。其他文字模型沿用已有策略。
+
+官方 GPT-6.1 Terra 的工具调用使用 Responses，Luna 保留 Chat Completions，参见 [OpenAI 参数与工具兼容说明](https://developers.openai.com/api/docs/guides/latest-model)。请求序列化回归可运行 `cd backend && node node_modules/tsx/dist/cli.mjs --test tests/text-model-reasoning.test.ts`，不访问外部模型服务。
+
 在设置中填写自己的 AI API。不要设置 `PUBLIC_BASE_URL` 指向需要登录的素材入口：部分模型会主动从 URL 拉取视频或音频参考，无法通过浏览器登录。当前图片的 base64 路径可用；需要远程拉取的媒体引用需另行提供受控、短期有效的地址。不要为此公开整个素材目录。
 
 前端构建、后端类型检查和实际 HTTP 验证通过不代表已验证所有模型的付费生成。

@@ -20,6 +20,7 @@ import { buildLanguageDirective } from './language.js'
 import { getContentLanguageFromRC } from './context.js'
 import { getVoiceReferenceInstructions } from './voice-reference-instructions.js'
 import { assertApiKeyValue } from '../utils/ai-errors.js'
+import { createNoReasoningFetch, isOfficialOpenAIHost, textModelPolicy } from './text-model-reasoning.js'
 
 // Default prompts (used when workspace/prompts/<type>.md 文件缺失时兜底)
 export const DEFAULT_PROMPTS: Record<string, { name: string; instructions: string }> = {
@@ -167,7 +168,7 @@ let lastLoggedTextEndpointKey = ''
  * 这里在请求体注入各厂商风格的关思考参数,让模型不产出 reasoning_content。
  *
  * - 默认开启;AI_DISABLE_THINKING=false 可关闭注入
- * - 官方 OpenAI / Gemini 端点跳过(官方 API 会拒绝未知参数)
+ * - 官方端点跳过通用补丁；目标 GPT-6 模型由末层 fetch 单独设置标准参数
  * - AI_THINKING_OFF_PATCH 可传 JSON 覆盖注入的 OpenAI 风格参数(适配不同中转站)
  */
 const thinkingOffEnabled = (process.env.AI_DISABLE_THINKING ?? 'true').toLowerCase() !== 'false'
@@ -192,8 +193,8 @@ function openaiThinkingOffPatch(): Record<string, any> {
   }
 }
 
-function createThinkingOffFetch(providerName: string, baseURL: string): typeof fetch | undefined {
-  if (!thinkingOffEnabled || isOfficialTextHost(baseURL)) return undefined
+function createThinkingOffFetch(providerName: string, baseURL: string, inner: typeof fetch): typeof fetch {
+  if (!thinkingOffEnabled || isOfficialTextHost(baseURL)) return inner
   const openaiPatch = openaiThinkingOffPatch()
 
   return async (input: any, init?: any) => {
@@ -220,7 +221,7 @@ function createThinkingOffFetch(providerName: string, baseURL: string): typeof f
         }
       }
     } catch { /* 解析失败则原样透传 */ }
-    return fetch(input, init)
+    return inner(input, init)
   }
 }
 
@@ -246,6 +247,10 @@ function createTemperatureFetch(providerName: string, temperature: number, inner
           // OpenAI 兼容格式
           body.temperature = temperature
           init = { ...init, body: JSON.stringify(body) }
+        } else if (body && typeof body === 'object' && 'input' in body) {
+          // Responses 格式（GPT-6.1 Terra 官方工具调用）。
+          body.temperature = temperature
+          init = { ...init, body: JSON.stringify(body) }
         }
       }
     } catch { /* 解析失败则原样透传 */ }
@@ -267,10 +272,6 @@ function createTemperatureFetch(providerName: string, temperature: number, inner
  * 截断问题主要出现在中转站/DeepSeek 类端点。
  */
 const defaultMaxTokens = Number(process.env.AI_MAX_TOKENS || 16384)
-
-function isOfficialOpenAIHost(baseURL: string) {
-  return /api\.openai\.com/.test(baseURL)
-}
 
 function createMaxTokensFetch(providerName: string, inner?: typeof fetch): typeof fetch {
   const base = inner || fetch
@@ -297,9 +298,11 @@ async function getModel(fileModel: string | undefined, modelOverride?: string, t
   // 请求可指定文本配置（含其 provider/baseUrl/apiKey），否则回退到当前启用配置
   const textConfig = (textConfigId ? await getConfigById(textConfigId) : null) || await getTextConfig()
   assertApiKeyValue(textConfig.apiKey)
-  const modelName = modelOverride || fileModel || textConfig.model
+  const configuredModel = modelOverride || fileModel || textConfig.model
   const providerName = textConfig.provider.toLowerCase()
   const resolvedBaseURL = getTextProviderBaseUrl(textConfig)
+  const policy = textModelPolicy(configuredModel, resolvedBaseURL)
+  const modelName = policy.model
   const temperature = textConfig.temperature ?? null
   const endpointKey = `${providerName}|${resolvedBaseURL}|${modelName}|t=${temperature ?? 'default'}`
   if (endpointKey !== lastLoggedTextEndpointKey) {
@@ -312,8 +315,9 @@ async function getModel(fileModel: string | undefined, modelOverride?: string, t
     })
   }
 
-  // 叠加请求补丁：thinking-off（非官方端点）+ 配置温度 + 输出上限（非官方 OpenAI）
-  const thinkingOffFetch = createThinkingOffFetch(providerName, resolvedBaseURL)
+  // 末层强制目标 GPT-6 模型 reasoning=none，覆盖 SDK 默认值和中转补丁。
+  const noReasoningFetch = createNoReasoningFetch(modelName)
+  const thinkingOffFetch = createThinkingOffFetch(providerName, resolvedBaseURL, noReasoningFetch)
   const tempFetch = temperature !== null
     ? createTemperatureFetch(providerName, temperature, thinkingOffFetch)
     : thinkingOffFetch
@@ -335,7 +339,8 @@ async function getModel(fileModel: string | undefined, modelOverride?: string, t
     apiKey: textConfig.apiKey,
     fetch: fetchImpl,
   } as any)
-  return provider.chat(modelName)
+  // 官方 Terra 的工具调用必须走 Responses；兼容中转仍保留 Chat Completions。
+  return policy.responses ? provider.responses(modelName) : provider.chat(modelName)
 }
 
 const AGENT_TOOLS: Record<string, Record<string, any>> = {
