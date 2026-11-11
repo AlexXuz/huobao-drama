@@ -907,7 +907,13 @@
       "awaitingDelivery": "视频已生成，等待交付",
       "restoreHint": "恢复已有任务，避免重复生成",
       "queued": "本地排队中，等待前一个视频完成",
-      "awaitingConfirmation": "上游状态待确认，后续视频已暂停"
+      "awaitingConfirmation": "上游状态待确认，后续视频已暂停",
+      "autoRetrying": "上游自动重试中",
+      "confirmUpstream": "等待核对上游",
+      "newGenerationHint": "重新生成会新建任务，可能再次消耗额度。",
+      "noVideo": "Muse 未出片，可重新生成",
+      "modelRefused": "上游拒绝生成，请检查需求或服务配置",
+      "generationFailed": "视频生成失败，可重新生成；详情见诊断信息"
     }
   },
   "errors": {

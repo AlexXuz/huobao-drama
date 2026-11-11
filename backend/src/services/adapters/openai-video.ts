@@ -119,9 +119,9 @@ export class OpenAIVideoAdapter implements VideoProviderAdapter {
     if (status === 'failed') {
       const err = result.error ?? result.result?.error
       const msg = typeof err === 'string' ? err : (err?.message || JSON.stringify(err) || 'Video generation failed')
-      return { status: 'failed', error: msg }
+      return { status: 'failed', error: msg, errorCode: typeof result.error_code === 'string' ? result.error_code : undefined }
     }
-    return { status: 'processing' }
+    return { status: 'processing', ...(result.stage === 'retrying' ? { stage: 'retrying' as const } : {}) }
   }
 
   extractVideoUrl(result: any): string | null {

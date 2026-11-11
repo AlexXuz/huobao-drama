@@ -899,7 +899,13 @@
       "awaitingDelivery": "動画生成済み・配信待ち",
       "restoreHint": "既存のタスクを復旧し、重複生成を避けます",
       "queued": "ローカルで待機中・前の動画の完了待ち",
-      "awaitingConfirmation": "生成先の状態を確認中・後続の動画は一時停止"
+      "awaitingConfirmation": "生成先の状態を確認中・後続の動画は一時停止",
+      "autoRetrying": "サービス側で自動再試行中",
+      "confirmUpstream": "サービス側の状態確認待ち",
+      "newGenerationHint": "再生成すると新しいタスクが作成され、追加のクレジットを消費する場合があります。",
+      "noVideo": "サービスは文字のみを返し、動画を生成しませんでした。再生成できます。",
+      "modelRefused": "サービスが生成を拒否しました。依頼内容やサービス設定を確認してください。",
+      "generationFailed": "動画生成に失敗しました。再生成できます。詳細は診断情報をご確認ください。"
     }
   },
   "errors": {

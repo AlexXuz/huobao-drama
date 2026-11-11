@@ -595,7 +595,8 @@
                       {{ videoErrorLabel(task.id, task.error) }}
                       <div class="flex gap-2">
                         <button class="btn btn-sm" @click.stop="copyVideoDiagnostics(task.id)">{{ t('episode.recovery.diagnostics') }}</button>
-                        <button v-if="canRecoverVideo(task.id)" class="btn btn-sm" @click.stop="genVid(task.storyboard, { forceNew: true })">{{ t('episode.recovery.newGeneration') }}</button>
+                        <button v-if="canRecoverVideo(task.id)" class="btn btn-sm" @click.stop="recoverVideo(task.storyboard)">{{ t('episode.recovery.restore') }}</button>
+                        <button v-if="!videoRegenerationBlocked(task.id)" class="btn btn-sm" @click.stop="genVid(task.storyboard, { forceNew: true })">{{ t('episode.recovery.newGeneration') }}</button>
                       </div>
                       <div v-if="videoModerationHint(task.error)" class="video-task-error-hint">{{ videoModerationHint(task.error) }}</div>
                     </div>
@@ -603,7 +604,7 @@
                   <button
                     class="btn btn-icon btn-sm video-task-action"
                     :title="videoTaskActionLabel(task.storyboard)"
-                    :disabled="videoTaskState(task.storyboard) === 'pending'"
+                    :disabled="videoActionDisabled(task.storyboard)"
                     @click.stop="genVid(task.storyboard)"
                   >
                     <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polygon points="23 7 16 12 23 17 23 7"/><rect x="1" y="5" width="15" height="14" rx="2" ry="2"/></svg>
@@ -746,6 +747,7 @@
                   <button
                     v-if="videoTaskState(selectedSb) !== 'pending'"
                     class="btn btn-primary btn-sm video-player-empty-action"
+                    :disabled="videoActionDisabled(selectedSb)"
                     @click="genVid(selectedSb)"
                   >
                     {{ videoTaskActionLabel(selectedSb) }}
@@ -831,11 +833,12 @@
                   </div>
                   <button
                     class="btn btn-primary video-inspector-action"
-                    :disabled="videoTaskState(selectedSb) === 'pending'"
+                    :disabled="videoActionDisabled(selectedSb)"
                     @click="genVid(selectedSb)"
                   >
                     {{ videoTaskActionLabel(selectedSb) }}
                   </button>
+                  <div v-if="latestVideoTask(selectedSb?.id)?.status === 'failed' && !videoRegenerationBlocked(selectedSb?.id)" class="video-param-hint">{{ t('episode.recovery.newGenerationHint') }}</div>
                 </div>
               </aside>
               </div>
@@ -1990,9 +1993,20 @@ function latestVideoTask(id) {
     .sort((a, b) => b.id - a.id)[0]
 }
 const recoverableVideoCount = computed(() => sbs.value.filter(sb => canRecoverVideo(sb.id)).length)
+const videoTerminalCodes = new Set(['generation_failed', 'submission_rejected', 'preparation_failed', 'delivery_failed',
+  'video_text_only', 'model_refusal', 'quota_exceeded', 'browser_queue_timeout', 'auth_error', 'workspace_unavailable', 'proxy_error'])
+function videoRegenerationBlocked(id) {
+  const task = latestVideoTask(id)
+  if (!task || task.status === 'completed' || task.result_url || videoTerminalCodes.has(task.error_code)) return false
+  return !!task.task_id || ['submission_unknown', 'upstream_status_unknown', 'generation_unknown'].includes(task.error_code)
+    || task.stage === 'submitting' || task.stage === 'awaiting_confirmation'
+}
+function videoActionDisabled(sb) {
+  return videoTaskState(sb) === 'pending' || (videoRegenerationBlocked(sb?.id) && !canRecoverVideo(sb?.id))
+}
 function canRecoverVideo(id) {
   const task = latestVideoTask(id)
-  return !!task && task.status === 'failed' && task.error_code !== 'generation_failed'
+  return !!task && task.status === 'failed' && (!videoTerminalCodes.has(task.error_code) || task.error_code === 'delivery_failed' || task.result_url)
     && !!(task.task_id || task.result_url)
 }
 function videoAwaitingDelivery(sb) {
@@ -2004,7 +2018,9 @@ function videoErrorLabel(id, error) {
   if (task?.error_code === 'delivery_failed' || (task?.result_url && task?.status === 'failed')) return t('episode.recovery.downloadFailed')
   if (task?.error_code === 'submission_unknown') return t('episode.recovery.unknownSubmission')
   if (task?.stage === 'awaiting_confirmation') return t('episode.recovery.awaitingConfirmation')
-  return mapError(error)
+  if (task?.error_code === 'video_text_only' || /模型(?:明确)?未生成(?:视频|媒体)|仅返回(?:文本|文字)/.test(String(error || ''))) return t('episode.recovery.noVideo')
+  if (task?.error_code === 'model_refusal') return t('episode.recovery.modelRefused')
+  return mapError(error, { fallback: 'episode.recovery.generationFailed' })
 }
 async function copyVideoDiagnostics(id) {
   const task = latestVideoTask(id)
@@ -2042,6 +2058,7 @@ function videoTaskStatusLabel(sb) {
   if (state === 'pending') {
     const stage = latestVideoTask(sb.id)?.stage
     return stage === 'queued' ? t('episode.recovery.queued')
+      : stage === 'retrying' ? t('episode.recovery.autoRetrying')
       : stage === 'awaiting_confirmation' ? t('episode.recovery.awaitingConfirmation')
       : stage === 'downloading' ? t('episode.recovery.downloading')
       : stage === 'transferring' ? t('episode.recovery.transferring') : t('episode.status.generating')
@@ -2054,6 +2071,7 @@ function videoTaskStatusLabel(sb) {
 
 function videoTaskActionLabel(sb) {
   if (canRecoverVideo(sb?.id)) return t('episode.recovery.restore')
+  if (videoRegenerationBlocked(sb?.id)) return t('episode.recovery.confirmUpstream')
   if (latestVideoTask(sb?.id)?.status === 'failed') return t('episode.recovery.newGeneration')
   const state = videoTaskState(sb)
   if (state === 'done') return t('episode.asset.regen')
@@ -3368,10 +3386,15 @@ function uploadAssetImage(kind, id) {
 }
 
 async function genVid(sb, opts = {}) {
+  if (isPendingVideo(sb.id)) return
+  if (videoRegenerationBlocked(sb.id)) {
+    if (canRecoverVideo(sb.id)) return recoverVideo(sb)
+    toast.info(t('episode.recovery.unknownSubmission'))
+    return
+  }
   if (!opts.forceNew && canRecoverVideo(sb.id)) return recoverVideo(sb)
   const latest = latestVideoTask(sb.id)
   const forceNew = opts.forceNew || latest?.status === 'failed'
-  if (forceNew && !window.confirm(t('episode.recovery.confirmNew'))) return
   const referenceImages = getShotReferenceImages(sb)
   // 参考素材完全来自分镜绑定的角色/场景/道具图片
   const params = {

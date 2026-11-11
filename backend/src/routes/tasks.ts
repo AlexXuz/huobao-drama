@@ -2,7 +2,7 @@ import { Hono } from 'hono'
 import { and, desc, eq } from 'drizzle-orm'
 import { db, schema } from '../db/index.js'
 import { success, created, badRequest } from '../utils/response.js'
-import { generateImage, generateVideo, recoverVideoTask, isUnconfirmedMuseTask } from '../services/generation.js'
+import { generateImage, generateVideo, recoverVideoTask, isUnconfirmedVideoTask, videoGenerationBlockReason } from '../services/generation.js'
 import { safeTaskError } from '../services/video-download.js'
 import { getActiveConfig, getConfigById } from '../services/ai.js'
 import { getDramaStylePrompt } from '../services/style-preset.js'
@@ -140,10 +140,8 @@ app.post('/', async (c) => {
       const [latest] = await db.select().from(schema.sysTask).where(and(
         eq(schema.sysTask.type, 'video'), eq(schema.sysTask.storyboardId, Number(body.storyboard_id))
       )).orderBy(desc(schema.sysTask.id)).limit(1)
-      if (latest?.status === 'processing') return badRequest(c, '该分镜已有运行中的任务，请等待结果')
-      if (latest?.status === 'failed' && body.force_new !== true) {
-        return badRequest(c, '请先恢复原任务；重新生成需明确确认可能再次计费')
-      }
+      const blocked = videoGenerationBlockReason(latest, body.force_new === true)
+      if (blocked) return badRequest(c, blocked)
     }
     // 请求显式指定 config_id（工作台模型下拉跨厂商切换）时优先；
     // 未指定才回退到集锁定配置，避免锁定配置与所选模型错配（如锁定 Seedance 却传 MiniMax 模型名）
@@ -268,7 +266,7 @@ app.delete('/:id', async (c) => {
   const id = Number(c.req.param('id'))
   const [task] = await db.select().from(schema.sysTask).where(eq(schema.sysTask.id, id))
   if (task?.status === 'processing') return badRequest(c, '任务运行中，暂不能删除')
-  if (task && isUnconfirmedMuseTask(task)) return badRequest(c, '上游任务状态尚未确认，暂不能删除，请先核对或恢复原任务')
+  if (task && isUnconfirmedVideoTask(task)) return badRequest(c, '上游任务状态尚未确认，暂不能删除，请先核对或恢复原任务')
   await db.delete(schema.sysTask).where(eq(schema.sysTask.id, id))
   return success(c)
 })

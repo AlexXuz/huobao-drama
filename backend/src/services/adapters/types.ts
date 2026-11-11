@@ -136,8 +136,9 @@ export interface VideoGenResponse {
 
 export interface VideoPollResponse {
   status: 'pending' | 'processing' | 'completed' | 'failed'
-  stage?: 'transferring'
+  stage?: 'transferring' | 'retrying'
   videoUrl?: string
   duration?: number
   error?: string
+  errorCode?: string
 }

@@ -899,7 +899,13 @@
       "awaitingDelivery": "Video generated; awaiting delivery",
       "restoreHint": "Recover the existing task instead of generating again",
       "queued": "Queued locally, waiting for the previous video",
-      "awaitingConfirmation": "Upstream status unconfirmed; following videos are paused"
+      "awaitingConfirmation": "Upstream status unconfirmed; following videos are paused",
+      "autoRetrying": "Upstream retry in progress",
+      "confirmUpstream": "Check upstream status",
+      "newGenerationHint": "Generating again creates a new task and may use more credits.",
+      "noVideo": "The provider returned text without a video. You can generate again.",
+      "modelRefused": "The provider declined generation. Check the request or service configuration.",
+      "generationFailed": "Video generation failed. You can generate again; see diagnostics for details."
     }
   },
   "errors": {

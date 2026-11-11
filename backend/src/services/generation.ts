@@ -31,14 +31,31 @@ function isMuseVideo(record: Pick<SysTaskRecord, 'type' | 'provider' | 'model'>)
     && (record.model?.trim().toLowerCase() || 'muse-video') === 'muse-video'
 }
 
-const MUSE_TERMINAL_ERRORS = new Set(['generation_failed', 'submission_rejected', 'preparation_failed', 'delivery_failed'])
+const VIDEO_TERMINAL_ERRORS = new Set(['generation_failed', 'submission_rejected', 'preparation_failed', 'delivery_failed',
+  'video_text_only', 'model_refusal', 'quota_exceeded', 'browser_queue_timeout', 'auth_error', 'workspace_unavailable', 'proxy_error'])
+
+/** A new request is safe only after the previous request has a known outcome. */
+export function isUnconfirmedVideoTask(record: SysTaskRecord): boolean {
+  if (record.type !== 'video' || record.status === 'completed' || record.resultUrl
+    || VIDEO_TERMINAL_ERRORS.has(record.errorCode || '')) return false
+  return !!record.taskId || ['submission_unknown', 'upstream_status_unknown', 'generation_unknown'].includes(record.errorCode || '')
+    || record.stage === 'submitting' || record.stage === 'awaiting_confirmation'
+}
+
+export function videoGenerationBlockReason(record: SysTaskRecord | undefined, forceNew = false): string | null {
+  if (record?.status === 'processing') return '该分镜已有运行中的任务，请等待结果'
+  if (record?.status === 'failed' && isUnconfirmedVideoTask(record)) {
+    return '上游结果尚未确认，请先恢复查询或核对上游任务'
+  }
+  if (record?.status === 'failed' && (record.resultUrl || record.errorCode === 'delivery_failed') && !forceNew) {
+    return '视频已生成，请恢复视频；如需新视频，请点击重新生成'
+  }
+  return null
+}
 
 /** A local failure does not prove that the upstream browser has stopped working. */
 export function isUnconfirmedMuseTask(record: SysTaskRecord): boolean {
-  if (!isMuseVideo(record) || record.status === 'completed' || record.resultUrl
-    || MUSE_TERMINAL_ERRORS.has(record.errorCode || '')) return false
-  return !!record.taskId || record.errorCode === 'submission_unknown'
-    || record.stage === 'submitting' || record.stage === 'awaiting_confirmation'
+  return isMuseVideo(record) && isUnconfirmedVideoTask(record)
 }
 
 async function awaitMuseConfirmation(id: number, message: string, code = 'upstream_status_unknown') {
@@ -188,8 +205,8 @@ export async function generateVideo(params: GenerateVideoParams): Promise<number
     if (storyboardId) {
       const [latest] = await db.select().from(schema.sysTask).where(and(eq(schema.sysTask.type, 'video'), eq(schema.sysTask.storyboardId, storyboardId)))
         .orderBy(desc(schema.sysTask.id)).limit(1)
-      if (latest?.status === 'processing') throw new Error('该分镜已有运行中的任务，请等待结果')
-      if (latest?.status === 'failed' && params.forceNew !== true) throw new Error('请先恢复原任务；重新生成需确认可能再次计费')
+      const blocked = videoGenerationBlockReason(latest, params.forceNew === true)
+      if (blocked) throw new Error(blocked)
     }
     // 指定配置（集锁定）可能已停用/删除/厂商收敛，失效时回退到当前启用配置
     const config = params.configId
@@ -530,6 +547,9 @@ async function pollTask(record: SysTaskRecord, config: AIConfig, taskId: string)
       if (type === 'video' && pollResp.stage === 'transferring') {
         await db.update(schema.sysTask).set({ stage: 'transferring', updatedAt: now() }).where(eq(schema.sysTask.id, record.id))
       }
+      if (type === 'video' && pollResp.stage === 'retrying') {
+        await db.update(schema.sysTask).set({ stage: 'retrying', updatedAt: now() }).where(eq(schema.sysTask.id, record.id))
+      }
 
       if (pollResp.status === 'completed') {
         if (type === 'image') {
@@ -558,10 +578,15 @@ async function pollTask(record: SysTaskRecord, config: AIConfig, taskId: string)
         }
       }
       if (pollResp.status === 'failed') {
+        if (isMuseVideo(record) && pollResp.errorCode === 'generation_unknown') {
+          await awaitMuseConfirmation(record.id, pollResp.error || '上游生成结果尚未确认', 'generation_unknown')
+          return
+        }
         // 上游明确失败（如内容审核拦截）属终态：立即落库，不重试不等待超时
         const deliveryFailed = /video_transfer_failed/.test(pollResp.error || '')
         if (deliveryFailed) await db.update(schema.sysTask).set({ stage: 'transferring' }).where(eq(schema.sysTask.id, record.id))
-        await failTask(record.id, pollResp.error || 'Generation failed', deliveryFailed ? 'delivery_failed' : 'generation_failed')
+        const terminalCode = isMuseVideo(record) && VIDEO_TERMINAL_ERRORS.has(pollResp.errorCode) ? pollResp.errorCode : 'generation_failed'
+        await failTask(record.id, pollResp.error || 'Generation failed', deliveryFailed ? 'delivery_failed' : terminalCode)
         return
       }
     } catch (err: any) {
@@ -679,7 +704,9 @@ export async function recoverVideoTask(id: number): Promise<void> {
     return
   }
   if (!record.resultUrl && !record.taskId) throw new Error('未保存上游任务编号，请先核对上游记录，勿重复生成')
-  if (record.errorCode === 'generation_failed') throw new Error('上游已确认生成失败，无法恢复原任务')
+  if (VIDEO_TERMINAL_ERRORS.has(record.errorCode || '') && record.errorCode !== 'delivery_failed' && !record.resultUrl) {
+    throw new Error('上游已确认生成失败，请重新生成')
+  }
   // 在任何异步配置读取前获取锁，重复点击不会启动多个下载。
   activeTasks.add(id)
   try {
