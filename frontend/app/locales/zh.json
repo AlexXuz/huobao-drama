@@ -913,7 +913,8 @@
       "newGenerationHint": "重新生成会新建任务，可能再次消耗额度。",
       "noVideo": "Muse 未出片，可重新生成",
       "modelRefused": "上游拒绝生成，请检查需求或服务配置",
-      "generationFailed": "视频生成失败，可重新生成；详情见诊断信息"
+      "generationFailed": "视频生成失败，可重新生成；详情见诊断信息",
+      "revisionRequired": "需调整提示词，查看诊断"
     }
   },
   "errors": {

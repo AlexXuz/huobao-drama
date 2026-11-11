@@ -32,7 +32,7 @@ function isMuseVideo(record: Pick<SysTaskRecord, 'type' | 'provider' | 'model'>)
 }
 
 const VIDEO_TERMINAL_ERRORS = new Set(['generation_failed', 'submission_rejected', 'preparation_failed', 'delivery_failed',
-  'video_text_only', 'model_refusal', 'quota_exceeded', 'browser_queue_timeout', 'auth_error', 'workspace_unavailable', 'proxy_error'])
+  'video_text_only', 'video_revision_required', 'model_refusal', 'quota_exceeded', 'browser_queue_timeout', 'auth_error', 'workspace_unavailable', 'proxy_error'])
 
 /** A new request is safe only after the previous request has a known outcome. */
 export function isUnconfirmedVideoTask(record: SysTaskRecord): boolean {

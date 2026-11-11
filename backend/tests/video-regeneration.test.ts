@@ -62,9 +62,10 @@ function request(storyboardId: number, forceNew?: boolean) {
 }
 
 test('confirmed failed tasks regenerate without force_new or a confirmation gate; running task cannot duplicate', async () => {
-  for (const code of ['generation_failed', 'video_text_only', 'model_refusal', 'quota_exceeded', 'browser_queue_timeout']) {
+  for (const code of ['generation_failed', 'video_text_only', 'video_revision_required', 'model_refusal', 'quota_exceeded', 'browser_queue_timeout']) {
     const sb = storyboard()
-    persisted({ storyboardId: sb.id, taskId: 'old-confirmed-failure', errorCode: code })
+    const previous = persisted({ storyboardId: sb.id, taskId: 'old-confirmed-failure', errorCode: code })
+    await assert.rejects(recoverVideoTask(previous.id), /请重新生成/, code)
     const before = posts
     holdDownload = true
     const response = await request(sb.id)

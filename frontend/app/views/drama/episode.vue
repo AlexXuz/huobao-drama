@@ -1994,7 +1994,7 @@ function latestVideoTask(id) {
 }
 const recoverableVideoCount = computed(() => sbs.value.filter(sb => canRecoverVideo(sb.id)).length)
 const videoTerminalCodes = new Set(['generation_failed', 'submission_rejected', 'preparation_failed', 'delivery_failed',
-  'video_text_only', 'model_refusal', 'quota_exceeded', 'browser_queue_timeout', 'auth_error', 'workspace_unavailable', 'proxy_error'])
+  'video_text_only', 'video_revision_required', 'model_refusal', 'quota_exceeded', 'browser_queue_timeout', 'auth_error', 'workspace_unavailable', 'proxy_error'])
 function videoRegenerationBlocked(id) {
   const task = latestVideoTask(id)
   if (!task || task.status === 'completed' || task.result_url || videoTerminalCodes.has(task.error_code)) return false
@@ -2018,6 +2018,7 @@ function videoErrorLabel(id, error) {
   if (task?.error_code === 'delivery_failed' || (task?.result_url && task?.status === 'failed')) return t('episode.recovery.downloadFailed')
   if (task?.error_code === 'submission_unknown') return t('episode.recovery.unknownSubmission')
   if (task?.stage === 'awaiting_confirmation') return t('episode.recovery.awaitingConfirmation')
+  if (task?.error_code === 'video_revision_required') return t('episode.recovery.revisionRequired')
   if (task?.error_code === 'video_text_only' || /模型(?:明确)?未生成(?:视频|媒体)|仅返回(?:文本|文字)/.test(String(error || ''))) return t('episode.recovery.noVideo')
   if (task?.error_code === 'model_refusal') return t('episode.recovery.modelRefused')
   return mapError(error, { fallback: 'episode.recovery.generationFailed' })
