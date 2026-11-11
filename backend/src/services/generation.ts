@@ -3,7 +3,7 @@
  * 创建(processing) → 适配器构建请求 → 同步完成或异步轮询 → 下载落盘 → 回写业务表
  */
 import { db, getInsertId, schema } from '../db/index.js'
-import { and, desc, eq, gt } from 'drizzle-orm'
+import { and, asc, desc, eq, gt } from 'drizzle-orm'
 import fs from 'node:fs'
 import { getAbsolutePath } from '../utils/storage.js'
 import { downloadVideo, safeTaskError } from './video-download.js'
@@ -20,6 +20,75 @@ type TaskType = 'image' | 'video'
 
 const activeTasks = new Set<number>()
 const videoSubmissions = new Set<number>()
+let museQueueRunning = false
+let museQueueRequested = false
+let restoringTasks = false
+
+type SysTaskRecord = typeof schema.sysTask.$inferSelect
+
+function isMuseVideo(record: Pick<SysTaskRecord, 'type' | 'provider' | 'model'>) {
+  return record.type === 'video' && record.provider?.trim().toLowerCase() === 'openai'
+    && (record.model?.trim().toLowerCase() || 'muse-video') === 'muse-video'
+}
+
+const MUSE_TERMINAL_ERRORS = new Set(['generation_failed', 'submission_rejected', 'preparation_failed', 'delivery_failed'])
+
+/** A local failure does not prove that the upstream browser has stopped working. */
+export function isUnconfirmedMuseTask(record: SysTaskRecord): boolean {
+  if (!isMuseVideo(record) || record.status === 'completed' || record.resultUrl
+    || MUSE_TERMINAL_ERRORS.has(record.errorCode || '')) return false
+  return !!record.taskId || record.errorCode === 'submission_unknown'
+    || record.stage === 'submitting' || record.stage === 'awaiting_confirmation'
+}
+
+async function awaitMuseConfirmation(id: number, message: string, code = 'upstream_status_unknown') {
+  await db.update(schema.sysTask).set({ status: 'failed', stage: 'awaiting_confirmation',
+    errorCode: code, errorMsg: safeTaskError(message), updatedAt: now() }).where(eq(schema.sysTask.id, id))
+  logTaskWarn('VideoTask', 'muse-queue-paused', { id, code })
+}
+
+/** One persistent Muse queue across configurations; other video providers are unaffected.
+ * `queued` means no generation POST has started. Only this dispatcher may submit it.
+ * Keep this private deployment conservative: all Muse configurations share one slot.
+ */
+function kickMuseQueue() {
+  museQueueRequested = true
+  if (museQueueRunning || restoringTasks) return
+  museQueueRunning = true
+  void (async () => {
+    do {
+      museQueueRequested = false
+      while (!restoringTasks) {
+        const rows = (await db.select().from(schema.sysTask).where(eq(schema.sysTask.type, 'video'))
+          .orderBy(asc(schema.sysTask.id))).filter(isMuseVideo)
+        // Include failed/unknown records, not just currently running promises.
+        if (rows.some(row => activeTasks.has(row.id) || isUnconfirmedMuseTask(row))) break
+        const next = rows.find(row => row.status === 'processing' && row.stage === 'queued' && !row.taskId && !row.resultUrl)
+        if (!next) break
+        activeTasks.add(next.id)
+        try {
+          // Queuing can outlive a configuration edit; never switch to the new default.
+          const config = await recoveryConfig(next)
+          await processTask(next.id, config)
+        } catch (error) {
+          const [current] = await db.select().from(schema.sysTask).where(eq(schema.sysTask.id, next.id))
+          if (current && isUnconfirmedMuseTask(current)) {
+            await awaitMuseConfirmation(next.id, safeTaskError(error), current.taskId ? 'upstream_status_unknown' : 'submission_unknown')
+          } else {
+            await failTask(next.id, safeTaskError(error), 'preparation_failed')
+          }
+        } finally {
+          activeTasks.delete(next.id)
+        }
+      }
+    } while (museQueueRequested && !restoringTasks)
+  })().catch(error => logTaskError('VideoTask', 'muse-queue-error', { error: safeTaskError(error) }))
+    .finally(() => {
+      museQueueRunning = false
+      if (museQueueRequested && !restoringTasks) kickMuseQueue()
+    })
+}
+
 function runBackground(id: number, job: () => Promise<void>) {
   if (activeTasks.has(id)) return
   activeTasks.add(id)
@@ -134,7 +203,7 @@ export async function generateVideo(params: GenerateVideoParams): Promise<number
       storyboardId: params.storyboardId,
       dramaId: params.dramaId,
       prompt: params.prompt,
-      model: params.model || config.model,
+      model: params.model || config.model || (config.provider.trim().toLowerCase() === 'openai' ? 'muse-video' : ''),
     }, {
       referenceMode: params.referenceMode || 'reference',
       imageUrl: params.imageUrl,
@@ -189,13 +258,14 @@ async function createTask(
   params: Record<string, unknown>,
 ): Promise<number> {
   const ts = now()
+  const queued = isMuseVideo({ type, provider: config.provider, model: fields.model ?? null })
   const res = await db.insert(schema.sysTask).values({
     type,
     ...fields,
     provider: config.provider,
     configId: config.id,
     configBaseUrl: config.baseUrl,
-    stage: 'submitting',
+    stage: queued ? 'queued' : 'submitting',
     params: JSON.stringify(params),
     status: 'processing',
     createdAt: ts,
@@ -203,7 +273,8 @@ async function createTask(
   })
 
   const id = getInsertId(res)
-  runBackground(id, () => processTask(id, config))
+  if (queued) kickMuseQueue()
+  else runBackground(id, () => processTask(id, config))
   return id
 }
 
@@ -217,6 +288,8 @@ function parseTaskParams(raw: string | null | undefined): Record<string, any> {
 }
 
 async function processTask(id: number, config: AIConfig) {
+  let submissionAttempted = false
+  let submissionRejected = false
   try {
     const [record] = await db.select().from(schema.sysTask).where(eq(schema.sysTask.id, id))
     if (!record) return
@@ -292,10 +365,17 @@ async function processTask(id: number, config: AIConfig) {
       body: isMultipart ? `[multipart/form-data: ${[...(body as FormData).keys()].join(', ')}]` : body,
     })
 
+    const requestBody = isMultipart ? (body as FormData) : JSON.stringify(body)
+    if (isMuseVideo(record)) {
+      // Persist the ambiguity boundary BEFORE any bytes can reach the upstream.
+      // A restart may replay queued preparation, but must never replay submitting.
+      await db.update(schema.sysTask).set({ stage: 'submitting', updatedAt: now() }).where(eq(schema.sysTask.id, id))
+    }
+    submissionAttempted = true
     const resp = await fetch(url, {
       method,
       headers,
-      body: isMultipart ? (body as FormData) : JSON.stringify(body),
+      body: requestBody,
       signal: AbortSignal.timeout(600_000),
     })
 
@@ -306,7 +386,11 @@ async function processTask(id: number, config: AIConfig) {
       record.taskId = gatewayTaskId
     }
 
-    if (!resp.ok) throw new Error(`API error ${resp.status}: ${await resp.text()}`)
+    if (!resp.ok) {
+      // Timeout/conflict responses can conceal an accepted job. Other 4xx are rejections.
+      submissionRejected = resp.status >= 400 && resp.status < 500 && ![408, 409].includes(resp.status)
+      throw new Error(`API error ${resp.status}: ${await resp.text()}`)
+    }
     const result = await resp.json() as any
     logTaskPayload(label, 'response payload', { id, provider: config.provider, result })
 
@@ -353,6 +437,13 @@ async function processTask(id: number, config: AIConfig) {
     await pollTask(record, config, taskId!)
   } catch (err: any) {
     const [current] = await db.select().from(schema.sysTask).where(eq(schema.sysTask.id, id))
+    if (current && isMuseVideo(current)) {
+      if (current.resultUrl) await failTask(id, safeTaskError(err), 'delivery_failed')
+      else if (!submissionAttempted) await failTask(id, safeTaskError(err), 'preparation_failed')
+      else if (submissionRejected && !current.taskId) await failTask(id, safeTaskError(err), 'submission_rejected')
+      else await awaitMuseConfirmation(id, safeTaskError(err), current.taskId ? 'upstream_status_unknown' : 'submission_unknown')
+      return
+    }
     const uncertain = current?.type === 'video' && !current.taskId && !current.resultUrl
       && (err instanceof TypeError || /timeout|abort|No task_id|API error 5/i.test(err.message))
     await failTask(id, safeTaskError(err), uncertain ? 'submission_unknown' : undefined)
@@ -374,7 +465,10 @@ async function failTask(id: number, message: string, code?: string) {
     .where(eq(schema.sysTask.id, id))
 }
 
-type SysTaskRecord = typeof schema.sysTask.$inferSelect
+async function failPolling(record: SysTaskRecord, message: string) {
+  if (isMuseVideo(record)) await awaitMuseConfirmation(record.id, message)
+  else await failTask(record.id, message)
+}
 
 async function pollTask(record: SysTaskRecord, config: AIConfig, taskId: string) {
   const type = record.type as TaskType
@@ -411,25 +505,28 @@ async function pollTask(record: SysTaskRecord, config: AIConfig, taskId: string)
       if (!resp.ok) {
         const rawBody = await resp.text().catch(() => "")
         const body = safeTaskError(rawBody.slice(0, 500))
-        const gone = resp.status === 404 || body.includes("task 不存在") || body.includes("not_found")
+        const gone = resp.status === 404 || (!isMuseVideo(record) && (body.includes("task 不存在") || body.includes("not_found")))
         if (gone) {
           logTaskError(label, "poll-not-found", { id: record.id, taskId, attempt: i + 1, status: resp.status, body })
-          await failTask(record.id, "视频任务在网关侧不存在（HTTP 404），已停止轮询")
+          // Muse can delete the task record without stopping its browser worker.
+          // A 404 is therefore not evidence that its generation slot is free.
+          if (isMuseVideo(record)) await awaitMuseConfirmation(record.id, '网关查询不到原任务（HTTP 404），上游是否结束待确认，队列已暂停')
+          else await failTask(record.id, "视频任务在网关侧不存在（HTTP 404），已停止轮询")
           return
         }
         consecutiveFailures += 1
         logTaskWarn(label, "poll-http-error", { id: record.id, taskId, attempt: i + 1, status: resp.status, failures: consecutiveFailures, body })
         if (consecutiveFailures >= 5) {
-          await failTask(record.id, `轮询连续失败 ${consecutiveFailures} 次，最后一次 HTTP ${resp.status}：${body || "无响应体"}`)
+          await failPolling(record, `轮询连续失败 ${consecutiveFailures} 次，最后一次 HTTP ${resp.status}：${body || "无响应体"}`)
           return
         }
         continue
       }
-      consecutiveFailures = 0
       const result = await resp.json() as any
 
       // 图片/视频 PollResponse 结构不同，这里统一按 any 取值后按 type 分支
       const pollResp: any = adapter.parsePollResponse(result)
+      consecutiveFailures = 0
       if (type === 'video' && pollResp.stage === 'transferring') {
         await db.update(schema.sysTask).set({ stage: 'transferring', updatedAt: now() }).where(eq(schema.sysTask.id, record.id))
       }
@@ -468,16 +565,20 @@ async function pollTask(record: SysTaskRecord, config: AIConfig, taskId: string)
         return
       }
     } catch (err: any) {
+      if (isMuseVideo(record) && ++consecutiveFailures >= 5) {
+        await failPolling(record, `轮询连续失败 ${consecutiveFailures} 次：${safeTaskError(err)}`)
+        return
+      }
       const exhausted = i === profile.attempts - 1
         || (profile.maxDurationMs != null && Date.now() - startedAt >= profile.maxDurationMs)
       if (exhausted) {
-        await failTask(record.id, `Timeout: ${err.message}`)
+        await failPolling(record, `Timeout: ${err.message}`)
         return
       }
       logTaskWarn(label, 'poll-retry', { id: record.id, taskId, attempt: i + 1, error: err.message })
     }
   }
-  await failTask(record.id, 'Timeout: polling attempts exhausted')
+  await failPolling(record, 'Timeout: polling attempts exhausted')
 }
 
 async function handleImageComplete(record: SysTaskRecord, imageUrl: string) {
@@ -573,6 +674,10 @@ export async function recoverVideoTask(id: number): Promise<void> {
   const [record] = await db.select().from(schema.sysTask).where(eq(schema.sysTask.id, id))
   if (!record || record.type !== 'video') throw new Error('视频任务不存在')
   if (activeTasks.has(id) || record.status === 'completed') return
+  if (isMuseVideo(record) && record.stage === 'queued' && record.status === 'processing' && !record.taskId && !record.resultUrl) {
+    kickMuseQueue()
+    return
+  }
   if (!record.resultUrl && !record.taskId) throw new Error('未保存上游任务编号，请先核对上游记录，勿重复生成')
   if (record.errorCode === 'generation_failed') throw new Error('上游已确认生成失败，无法恢复原任务')
   // 在任何异步配置读取前获取锁，重复点击不会启动多个下载。
@@ -597,22 +702,51 @@ export async function recoverVideoTask(id: number): Promise<void> {
       }
       await markPolling(id, record.taskId!)
       await pollTask(record, originalConfig, record.taskId!)
-    })().catch(error => failTask(id, safeTaskError(error), 'recovery_failed')).finally(() => activeTasks.delete(id))
+    })().catch(async error => {
+      const [current] = await db.select().from(schema.sysTask).where(eq(schema.sysTask.id, id))
+      if (current && isUnconfirmedMuseTask(current)) await awaitMuseConfirmation(id, safeTaskError(error))
+      else await failTask(id, safeTaskError(error), 'recovery_failed')
+    }).finally(() => {
+      activeTasks.delete(id)
+      if (isMuseVideo(record)) kickMuseQueue()
+    })
   } catch (error) {
     activeTasks.delete(id)
+    try {
+      if (isUnconfirmedMuseTask(record)) await awaitMuseConfirmation(id, safeTaskError(error))
+    } finally {
+      if (isMuseVideo(record)) kickMuseQueue()
+    }
     throw error
   }
 }
 
 export async function resumeInterruptedTasks() {
-  const tasks = await db.select().from(schema.sysTask).where(eq(schema.sysTask.status, 'processing')).orderBy(desc(schema.sysTask.id))
-  for (const task of tasks) {
-    if (task.type === 'video' && (task.taskId || task.resultUrl)) {
-      try { await recoverVideoTask(task.id) } catch (error) { await failTask(task.id, safeTaskError(error), 'recovery_failed') }
-    } else {
-      await failTask(task.id, task.type === 'video' ? '服务中断，提交结果待确认，请先核对上游记录' : '服务重启，生成任务中断，请重试',
-        task.type === 'video' ? 'submission_unknown' : 'interrupted')
+  // Reconcile EVERY accepted Muse task before allowing any queued generation POST.
+  // Failed network queries remain occupants across process restarts.
+  restoringTasks = true
+  try {
+    const tasks = await db.select().from(schema.sysTask).orderBy(asc(schema.sysTask.id))
+    for (const task of tasks) {
+      const muse = isMuseVideo(task)
+      if (task.status !== 'processing' && !(muse && isUnconfirmedMuseTask(task))) continue
+      if (muse && task.stage === 'queued' && !task.taskId && !task.resultUrl) continue
+      if (task.type === 'video' && (task.taskId || task.resultUrl)) {
+        try { await recoverVideoTask(task.id) }
+        catch (error) {
+          if (muse && isUnconfirmedMuseTask(task)) await awaitMuseConfirmation(task.id, safeTaskError(error))
+          else await failTask(task.id, safeTaskError(error), 'recovery_failed')
+        }
+      } else if (muse) {
+        await awaitMuseConfirmation(task.id, '服务中断，提交结果待确认，请先核对上游记录', 'submission_unknown')
+      } else {
+        await failTask(task.id, task.type === 'video' ? '服务中断，提交结果待确认，请先核对上游记录' : '服务重启，生成任务中断，请重试',
+          task.type === 'video' ? 'submission_unknown' : 'interrupted')
+      }
     }
+  } finally {
+    restoringTasks = false
+    kickMuseQueue()
   }
 }
 

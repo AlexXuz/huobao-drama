@@ -2,7 +2,7 @@ import { Hono } from 'hono'
 import { and, desc, eq } from 'drizzle-orm'
 import { db, schema } from '../db/index.js'
 import { success, created, badRequest } from '../utils/response.js'
-import { generateImage, generateVideo, recoverVideoTask } from '../services/generation.js'
+import { generateImage, generateVideo, recoverVideoTask, isUnconfirmedMuseTask } from '../services/generation.js'
 import { safeTaskError } from '../services/video-download.js'
 import { getActiveConfig, getConfigById } from '../services/ai.js'
 import { getDramaStylePrompt } from '../services/style-preset.js'
@@ -268,6 +268,7 @@ app.delete('/:id', async (c) => {
   const id = Number(c.req.param('id'))
   const [task] = await db.select().from(schema.sysTask).where(eq(schema.sysTask.id, id))
   if (task?.status === 'processing') return badRequest(c, '任务运行中，暂不能删除')
+  if (task && isUnconfirmedMuseTask(task)) return badRequest(c, '上游任务状态尚未确认，暂不能删除，请先核对或恢复原任务')
   await db.delete(schema.sysTask).where(eq(schema.sysTask.id, id))
   return success(c)
 })

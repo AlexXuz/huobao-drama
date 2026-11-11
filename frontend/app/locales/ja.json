@@ -897,7 +897,9 @@
       "restoreFailed": "動画を復旧 ({n})",
       "transferring": "動画生成済み・転送中",
       "awaitingDelivery": "動画生成済み・配信待ち",
-      "restoreHint": "既存のタスクを復旧し、重複生成を避けます"
+      "restoreHint": "既存のタスクを復旧し、重複生成を避けます",
+      "queued": "ローカルで待機中・前の動画の完了待ち",
+      "awaitingConfirmation": "生成先の状態を確認中・後続の動画は一時停止"
     }
   },
   "errors": {

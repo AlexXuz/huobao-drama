@@ -905,7 +905,9 @@
       "restoreFailed": "恢复视频({n})",
       "transferring": "视频已生成，转存中",
       "awaitingDelivery": "视频已生成，等待交付",
-      "restoreHint": "恢复已有任务，避免重复生成"
+      "restoreHint": "恢复已有任务，避免重复生成",
+      "queued": "本地排队中，等待前一个视频完成",
+      "awaitingConfirmation": "上游状态待确认，后续视频已暂停"
     }
   },
   "errors": {

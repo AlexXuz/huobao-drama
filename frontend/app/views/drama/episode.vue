@@ -2003,6 +2003,7 @@ function videoErrorLabel(id, error) {
   const task = latestVideoTask(id)
   if (task?.error_code === 'delivery_failed' || (task?.result_url && task?.status === 'failed')) return t('episode.recovery.downloadFailed')
   if (task?.error_code === 'submission_unknown') return t('episode.recovery.unknownSubmission')
+  if (task?.stage === 'awaiting_confirmation') return t('episode.recovery.awaitingConfirmation')
   return mapError(error)
 }
 async function copyVideoDiagnostics(id) {
@@ -2040,9 +2041,12 @@ function videoTaskStatusLabel(sb) {
   if (state === 'done') return t('episode.status.done')
   if (state === 'pending') {
     const stage = latestVideoTask(sb.id)?.stage
-    return stage === 'downloading' ? t('episode.recovery.downloading')
+    return stage === 'queued' ? t('episode.recovery.queued')
+      : stage === 'awaiting_confirmation' ? t('episode.recovery.awaitingConfirmation')
+      : stage === 'downloading' ? t('episode.recovery.downloading')
       : stage === 'transferring' ? t('episode.recovery.transferring') : t('episode.status.generating')
   }
+  if (state === 'failed' && latestVideoTask(sb?.id)?.stage === 'awaiting_confirmation') return t('episode.recovery.awaitingConfirmation')
   if (state === 'failed' && latestVideoTask(sb?.id)?.result_url) return t('episode.recovery.localDownloadFailed')
   if (state === 'failed') return t('episode.status.failed')
   return t('episode.status.todo')

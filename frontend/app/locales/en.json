@@ -897,7 +897,9 @@
       "restoreFailed": "Recover videos ({n})",
       "transferring": "Video generated; transferring",
       "awaitingDelivery": "Video generated; awaiting delivery",
-      "restoreHint": "Recover the existing task instead of generating again"
+      "restoreHint": "Recover the existing task instead of generating again",
+      "queued": "Queued locally, waiting for the previous video",
+      "awaitingConfirmation": "Upstream status unconfirmed; following videos are paused"
     }
   },
   "errors": {

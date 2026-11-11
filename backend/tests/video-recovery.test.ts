@@ -103,4 +103,4 @@ test('response header preserves recovery ID when response JSON is interrupted; c
   db.update(schema.aiServiceConfigs).set({baseUrl:base}).where(eq(schema.aiServiceConfigs.id,config.id)).run()
 })
 
-test.after(async()=>{ await new Promise<void>(resolve=>server.close(()=>resolve())); await fs.rm(root,{recursive:true,force:true}) })
+test.after(async()=>{ await new Promise<void>(resolve=>server.close(()=>resolve())); db.$client.close(); await fs.rm(root,{recursive:true,force:true}) })
